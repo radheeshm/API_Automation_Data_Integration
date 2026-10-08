@@ -1,0 +1,12 @@
+{
+  "method": "GET",
+  "url": "https://jsonplaceholder.typicode.com/users",
+  "auth_type": "None",
+  "token": "",
+  "record_id": "",
+  "page": "1",
+  "per_page": "5",
+  "retries": "3",
+  "timeout": "20",
+  "demo_mode": true
+}
