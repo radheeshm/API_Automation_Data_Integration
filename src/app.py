@@ -358,13 +358,19 @@ class APIAutomationApp(tk.Tk):
         table_frame.pack(fill="both", expand=True, padx=10, pady=(2, 8))
         table_frame.grid_rowconfigure(0, weight=1)
         table_frame.grid_columnconfigure(0, weight=1)
-        self.tree = ttk.Treeview(table_frame, show="headings", selectmode="extended", height=8)
-        self.tree.grid(row=0, column=0, sticky="nsew")
-        y = ttk.Scrollbar(table_frame, orient="vertical", command=self.tree.yview)
+        # Use a native Tk canvas/grid table instead of ttk.Treeview.
+        # This avoids Windows/Tk theme-specific rendering issues in PyInstaller builds.
+        self.table_canvas = tk.Canvas(table_frame, bg=WHITE, highlightthickness=0, bd=0)
+        self.table_canvas.grid(row=0, column=0, sticky="nsew")
+        y = ttk.Scrollbar(table_frame, orient="vertical", command=self.table_canvas.yview)
         y.grid(row=0, column=1, sticky="ns")
-        x = ttk.Scrollbar(table_frame, orient="horizontal", command=self.tree.xview)
+        x = ttk.Scrollbar(table_frame, orient="horizontal", command=self.table_canvas.xview)
         x.grid(row=1, column=0, sticky="ew")
-        self.tree.configure(yscrollcommand=y.set, xscrollcommand=x.set)
+        self.table_canvas.configure(yscrollcommand=y.set, xscrollcommand=x.set)
+        self.table_inner = tk.Frame(self.table_canvas, bg=WHITE)
+        self.table_window = self.table_canvas.create_window((0, 0), window=self.table_inner, anchor="nw")
+        self.table_inner.bind("<Configure>", lambda e: self.table_canvas.configure(scrollregion=self.table_canvas.bbox("all")))
+        self.table_canvas.bind("<Configure>", self._resize_table_view)
 
         log_tab = tk.Frame(notebook, bg=WHITE)
         notebook.add(log_tab, text=" REQUEST LOG ")
@@ -459,10 +465,17 @@ class APIAutomationApp(tk.Tk):
         self._status("Ready | New request")
         self._log("Request form reset")
 
+    def _resize_table_view(self, event):
+        # Keep the table at least as wide as the viewport while allowing horizontal scrolling.
+        if hasattr(self, "table_canvas"):
+            self.table_canvas.itemconfigure(self.table_window, width=max(event.width, self.table_inner.winfo_reqwidth()))
+
     def _clear_tree(self):
-        for item in self.tree.get_children():
-            self.tree.delete(item)
-        self.tree["columns"] = ()
+        if hasattr(self, "table_inner"):
+            for child in self.table_inner.winfo_children():
+                child.destroy()
+            self.table_canvas.update_idletasks()
+            self.table_canvas.configure(scrollregion=self.table_canvas.bbox("all"))
 
     def _read_request_values(self):
         method = self.method_var.get().upper()
@@ -653,15 +666,37 @@ class APIAutomationApp(tk.Tk):
             for key in row:
                 if key not in columns:
                     columns.append(key)
-        self.tree["columns"] = columns
-        for col in columns:
-            self.tree.heading(col, text=col)
-            width = max(120, min(280, 20 + max(len(str(col)), *(len(str(row.get(col, ""))) for row in rows)) * 8))
-            self.tree.column(col, width=width, minwidth=100, anchor="w", stretch=False)
-        self.tree.tag_configure("data", foreground=TEXT, background=WHITE)
-        self.tree.tag_configure("alt", foreground=TEXT, background="#F4FBF6")
-        for idx, row in enumerate(rows):
-            self.tree.insert("", "end", values=[row.get(c, "") for c in columns], tags=("alt" if idx % 2 else "data",))
+        # Render headers and rows with native Tk labels. This is deterministic in
+        # both the Python source run and PyInstaller/Windows builds.
+        for col_idx, col in enumerate(columns):
+            values_for_col = [row.get(col, "") for row in rows]
+            width = max(120, min(280, 20 + max(len(str(col)), *(len(str(v)) for v in values_for_col)) * 8))
+            header = tk.Label(
+                self.table_inner, text=str(col), bg=GREEN_DARK, fg=WHITE,
+                font=("Segoe UI", 9, "bold"), padx=8, pady=7,
+                anchor="w", width=max(14, min(34, width // 8))
+            )
+            header.grid(row=0, column=col_idx, sticky="nsew", padx=(0, 1), pady=(0, 1))
+            self.table_inner.grid_columnconfigure(col_idx, minsize=width, weight=0)
+
+        for row_idx, row in enumerate(rows, start=1):
+            bg = WHITE if row_idx % 2 else GREEN_PALE
+            for col_idx, col in enumerate(columns):
+                value = row.get(col, "")
+                if isinstance(value, (dict, list)):
+                    value = json.dumps(value, ensure_ascii=False)
+                cell = tk.Label(
+                    self.table_inner, text=str(value), bg=bg, fg=TEXT,
+                    font=("Segoe UI", 9), padx=8, pady=6,
+                    anchor="w", width=max(14, min(34, self.table_inner.grid_columnconfigure(col_idx)["minsize"] // 8))
+                )
+                cell.grid(row=row_idx, column=col_idx, sticky="nsew", padx=(0, 1), pady=(0, 1))
+
+        self.table_inner.update_idletasks()
+        self.table_canvas.update_idletasks()
+        self.table_canvas.configure(scrollregion=self.table_canvas.bbox("all"))
+        self.table_canvas.yview_moveto(0)
+        self.table_canvas.xview_moveto(0)
         self._log(f"Preview generated: {len(rows)} rows / {len(columns)} columns")
 
     def export_csv(self):
