@@ -1,4 +1,4 @@
-# AKASH TECH SOLUTIONS — Project 03
+# AKASH TECH SOLUTIONS
 ## API Automation & Data Integration
 
 Professional Python/Tkinter desktop application for REST API testing, automation and business data integration.
